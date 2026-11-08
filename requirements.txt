@@ -1,0 +1,9 @@
+streamlit
+python-dotenv
+groq
+langgraph
+hindsight-client
+chromadb
+sentence-transformers
+pymupdf
+tavily-python

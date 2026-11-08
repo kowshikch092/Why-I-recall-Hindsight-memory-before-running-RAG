@@ -3,12 +3,16 @@ import streamlit as st
 from src.agent.graph import run_support_agent
 from src.history import (
     initialize_database,
-    save_message,
+    create_thread,
+    get_customer_threads,
+    get_latest_thread_for_customer,
     get_chat_history,
-    get_all_customers,
+    save_message,
+    update_thread_title,
     clear_chat_history
 )
 from src.memory.hindsight_memory import initialize_customer
+from src.llm import generate_chat_title
 
 
 st.set_page_config(
@@ -19,11 +23,20 @@ st.set_page_config(
 
 initialize_database()
 
+# Customer ID identifies the customer (and therefore the Hindsight memory
+# bank). Thread ID identifies one conversation. A customer can have many
+# threads; all of them share the same memory bank.
 if "customer_id" not in st.session_state:
-    st.session_state.customer_id = "Thread-001"
+    st.session_state.customer_id = "Customer-001"
 
-if "processing" not in st.session_state:
-    st.session_state.processing = False
+if "thread_id" not in st.session_state:
+    existing_thread = get_latest_thread_for_customer(st.session_state.customer_id)
+    st.session_state.thread_id = (
+        existing_thread or create_thread(st.session_state.customer_id)
+    )
+
+if "confirm_clear" not in st.session_state:
+    st.session_state.confirm_clear = False
 
 
 # ---------------- SIDEBAR ----------------
@@ -33,38 +46,70 @@ with st.sidebar:
 
     st.subheader("Customer Profile")
 
-    customer_id = st.text_input(
-        "Thread ID",
-        value=st.session_state.customer_id
+    customer_id_input = st.text_input(
+        "Customer ID",
+        value=st.session_state.customer_id,
+        help="Identifies the customer across all of their conversations."
     )
+    new_customer_id = customer_id_input.strip() or st.session_state.customer_id
 
-    if customer_id.strip():
-        st.session_state.customer_id = customer_id.strip()
+    if new_customer_id != st.session_state.customer_id:
+        st.session_state.customer_id = new_customer_id
+        existing_thread = get_latest_thread_for_customer(new_customer_id)
+        st.session_state.thread_id = (
+            existing_thread or create_thread(new_customer_id)
+        )
+        st.session_state.confirm_clear = False
+        st.rerun()
+
+    st.divider()
+
+    if st.button("➕ New Chat", use_container_width=True, type="primary"):
+        st.session_state.thread_id = create_thread(st.session_state.customer_id)
+        st.rerun()
 
     st.divider()
 
     st.subheader("Chat History")
 
-    customers = get_all_customers()
+    threads = get_customer_threads(st.session_state.customer_id)
 
-    if customers:
-        selected_customer = st.selectbox(
-            "Select previous Chat",
-            customers,
-            index=(
-                customers.index(st.session_state.customer_id)
-                if st.session_state.customer_id in customers
-                else 0
-            )
+    if threads:
+        for thread in threads:
+            is_active = thread["thread_id"] == st.session_state.thread_id
+
+            if st.button(
+                thread["title"],
+                key=f"thread_btn_{thread['thread_id']}",
+                use_container_width=True,
+                type="primary" if is_active else "secondary"
+            ):
+                if not is_active:
+                    st.session_state.thread_id = thread["thread_id"]
+                    st.rerun()
+    else:
+        st.caption("No previous conversations yet.")
+
+    st.divider()
+
+    with st.expander("🗑️ Clear chat history"):
+        st.caption(
+            "This permanently deletes every conversation for the "
+            "current customer, including the one you're viewing now."
+        )
+        st.session_state.confirm_clear = st.checkbox(
+            "I understand, delete everything for this customer",
+            value=st.session_state.confirm_clear
         )
 
-        if st.button("Load selected Chats"):
-            st.session_state.customer_id = selected_customer
+        if st.button(
+            "Clear all chat history",
+            disabled=not st.session_state.confirm_clear
+        ):
+            clear_chat_history(st.session_state.customer_id)
+            st.session_state.thread_id = create_thread(st.session_state.customer_id)
+            st.session_state.confirm_clear = False
             st.rerun()
-
-    if st.button("Clear Previous chat's  history"):
-        clear_chat_history(st.session_state.customer_id)
-        st.rerun()
 
     st.divider()
 
@@ -82,10 +127,18 @@ st.write(
     "with long-term memory."
 )
 
-current_customer = st.session_state.customer_id
+active_customer = st.session_state.customer_id
+active_thread = st.session_state.thread_id
+
+active_title = next(
+    (t["title"] for t in get_customer_threads(active_customer)
+     if t["thread_id"] == active_thread),
+    "New Conversation"
+)
+st.caption(f"💬 {active_title}  ·  Thread: `{active_thread}`")
 
 try:
-    initialize_customer(current_customer)
+    initialize_customer(active_customer)
 except Exception as error:
     st.error(f"Could not initialize customer memory: {error}")
     st.stop()
@@ -93,7 +146,7 @@ except Exception as error:
 
 # ---------------- CHAT HISTORY ----------------
 
-history = get_chat_history(current_customer)
+history = get_chat_history(active_thread)
 
 for message in history:
     with st.chat_message(message["role"]):
@@ -107,11 +160,17 @@ question = st.chat_input(
 )
 
 if question:
+    is_first_message = len(history) == 0
+
     save_message(
-        current_customer,
+        active_thread,
         "user",
         question
     )
+
+    if is_first_message:
+        title = generate_chat_title(question)
+        update_thread_title(active_thread, title)
 
     with st.chat_message("user"):
         st.markdown(question)
@@ -120,7 +179,7 @@ if question:
         with st.spinner("SmartCare is thinking..."):
             try:
                 result = run_support_agent(
-                    current_customer,
+                    active_customer,
                     question
                 )
 
@@ -181,7 +240,7 @@ if question:
                         )
 
                 save_message(
-                    current_customer,
+                    active_thread,
                     "assistant",
                     answer
                 )

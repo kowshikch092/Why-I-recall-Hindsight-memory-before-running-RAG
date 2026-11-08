@@ -13,6 +13,27 @@ def generate_response(prompt):
         temperature=0.3
     )
     return response.choices[0].message.content
+def generate_chat_title(question):
+    fallback = " ".join(question.strip().split()[:6]) or "New Conversation"
+
+    try:
+        prompt = (
+            "Summarize this customer support question as a short chat "
+            "title: 3-6 words, title case, no quotes, no trailing "
+            "punctuation. Return only the title, nothing else.\n\n"
+            f"Question: {question.strip()}"
+        )
+        title = generate_response(prompt).strip().strip('"').strip()
+
+        if not title or len(title) > 60:
+            return fallback
+
+        return title
+    except Exception:
+        # A flaky LLM call should never block chat creation.
+        return fallback
+
+
 def extract_customer_memory(conversation):
     prompt=f"""
 You are a customer-support memory extraction system.

@@ -41,7 +41,10 @@ def build_support_graph():
 
     builder.add_edge(START, "retrieve_memory")
     builder.add_edge("retrieve_memory", "retrieve_rag")
-
+    '''
+    retrieve_rag
+   ├─ use_web is true  → web_search → generate_answer
+   └─ otherwise        → generate_answer'''
     builder.add_conditional_edges(
         "retrieve_rag",
         route_after_rag,

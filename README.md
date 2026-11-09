@@ -61,7 +61,7 @@ The result: a returning customer can type *"hii"* or *"it's happening again"*, a
 ## 🏗 Architecture
 
 <div align="center">
-<img src="assets/smartcare-architecture.png" alt="SmartCare AI architecture" width="850"/>
+<img src="assets\smartcare-architecture.png" alt="SmartCare AI architecture" width="850"/>
 </div>
 
 ### Agent graph
